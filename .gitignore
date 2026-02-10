@@ -1,0 +1,10 @@
+[Bb]uild/
+*.sln
+*.vs/
+*.sln.DotSettings
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+[Aa]ssets/
+*.exe
+[Bb]in/
