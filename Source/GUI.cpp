@@ -569,9 +569,9 @@ void ChatAppGUI() {
         static char   user_name[64] = {};
         static Client user_client{};
         static u32    current_channel_id = ChannelIDGlobal;
-        static char   input_buffer[512]{}; // TODO: Store somewhere else.
-        static u32 last_message_count {}; // Used for checking if theres new messages
-        static bool last_was_at_bottom {};
+        static char   input_buffer[512]{};  // TODO: Store somewhere else.
+        static u32    last_message_count{}; // Used for checking if theres new messages
+        static bool   last_was_at_bottom{};
 
         // ===== LOG IN =====
 
@@ -643,14 +643,15 @@ void ChatAppGUI() {
                         // Can have like a server user which can print server messages.
 
                         for (u32 i = 0; i < user_client.channel_count; i++) {
-                                ImVec2 channel_text_size = ImGui::CalcTextSize(user_client.chat_channel_names[i].c_str());
+                                ChannelID chat_channel_id   = user_client.chat_channels[i];
+                                ImVec2    channel_text_size = ImGui::CalcTextSize(user_client.channels[chat_channel_id].name.c_str());
 
                                 ImGui::PushID(i);
 
                                 ImGui::BeginChild("##channels", ImVec2{ ImGui::GetContentRegionAvail().x, channel_text_size.y + 30 }, child_flags);
 
                                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.3f, 1.0f));
-                                ImGui::Text(user_client.chat_channel_names[i].c_str());
+                                ImGui::Text(user_client.channels[chat_channel_id].name.c_str());
                                 ImGui::PopStyleColor();
 
                                 ImGui::EndChild();
@@ -685,20 +686,23 @@ void ChatAppGUI() {
                                 // ===== Get Messages =====
                                 user_client.ProcessMessages();
 
-                                std::vector<Message>& messages      = user_client.channel_messages[current_channel_id];
-                                u32                   message_count = (u32)messages.size();
+                                Message* messages      = user_client.channels[current_channel_id].messages;
+                                u32      message_count = user_client.channels[current_channel_id].message_count;
 
                                 for (u32 i = 0; i < message_count; i++) {
-                                        ImVec2 user_text_size = ImGui::CalcTextSize("Benas");
+                                        const User& user = user_client.users[messages[i].sender];
+
+                                        ImVec2 user_text_size = ImGui::CalcTextSize(user.user_name.c_str());
                                         ImVec2 message_text_size =
                                                 ImGui::CalcTextSize(messages[i].content, NULL, false, ImGui::GetContentRegionAvail().x - user_text_size.x - 40);
 
                                         ImGui::PushID(i);
 
-                                        ImGui::BeginChild("##messages", ImVec2{ ImGui::GetContentRegionAvail().x, message_text_size.y + 30 }, child_flags);
+                                        // TODO: Scaling is broken, need to find good values for different windows scales, for 1.5 worked good but not for 1.0
+                                        ImGui::BeginChild("##messages", ImVec2{ ImGui::GetContentRegionAvail().x, message_text_size.y  * 2.0f }, child_flags);
 
                                         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.3f, 1.0f));
-                                        ImGui::TextWrapped("Benas");
+                                        ImGui::TextWrapped(user.user_name.c_str());
                                         ImGui::PopStyleColor();
 
                                         ImGui::SameLine();
@@ -729,7 +733,7 @@ void ChatAppGUI() {
 
                                 // If theres new messages and were at the bottom of the chat window, scroll with the message.
                                 if (last_message_count != message_count and last_was_at_bottom) {
-                                         // Add some offset, for some reason FLT_MAX doesnt work, but this allows multi line messages to also be scrolled.
+                                        // Add some offset, for some reason FLT_MAX doesnt work, but this allows multi line messages to also be scrolled.
                                         message_scroll_position = ImGui::GetScrollMaxY() + 10000.0f;
                                 }
 
@@ -744,12 +748,12 @@ void ChatAppGUI() {
                         ImGui::BeginGroup();
                         {
                                 // ===== Send Input =====
-                                if (ImGui::InputTextMultiline("###Message", input_buffer, 512,
-                                                              ImVec2{ ImGui::GetContentRegionAvail().x - 150, ImGui::GetContentRegionAvail().y },
-                                                              ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_EnterReturnsTrue)) {
+                                if (ImGui::InputTextMultiline(
+                                            "###Message", input_buffer, 512, ImVec2{ ImGui::GetContentRegionAvail().x - 150, ImGui::GetContentRegionAvail().y },
+                                            ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_EnterReturnsTrue)) {
                                         if (ImGui::IsKeyPressed(ImGuiKey_Enter) and ImGui::IsKeyDown(ImGuiKey_LeftCtrl)) {
-                                                u32 end = (u32)strlen(input_buffer);
-                                                input_buffer[end] = '\n';
+                                                u32 end               = (u32)strlen(input_buffer);
+                                                input_buffer[end]     = '\n';
                                                 input_buffer[end + 1] = 0;
                                         } else if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
                                                 if (strlen(input_buffer) != 0) user_client.SendMessage(ChannelIDGlobal, input_buffer);
@@ -771,8 +775,7 @@ void ChatAppGUI() {
                                         if (strlen(input_buffer) != 0) user_client.SendMessage(ChannelIDGlobal, input_buffer);
 
                                         std::memset(input_buffer, 0, 512);
-                                        if (ImGuiInputTextState * state{ ImGui::GetInputTextState(ImGui::GetItemID()) })
-                                                state->ReloadUserBufAndSelectAll();
+                                        if (ImGuiInputTextState * state{ ImGui::GetInputTextState(ImGui::GetItemID()) }) state->ReloadUserBufAndSelectAll();
                                 }
                         }
                         ImGui::EndGroup();
@@ -797,6 +800,50 @@ void ChatAppGUI() {
                         // Otherwise we can reserve how many there should be and then request for the messages that we dont have.
                         // if we add message deletion this becomes a bit more difficult, unless we store some empty message for deleted messages.
                         // Can have like a server user which can print server messages.
+
+                        Channel& channel = user_client.channels[current_channel_id];
+
+                        for (u32 i = 0; i < channel.user_count; i++) {
+                                UserID user_id = channel.users[i];
+                                User&  user    = user_client.users[user_id];
+
+                                if (user.user_name.empty()) {
+                                        // ===== Request Name =====
+                                        Message message{};
+
+                                        message.channel = ChannelIDServer;
+
+                                        // ===== Set Type =====
+                                        ServerMessageType message_type = MessageUserNameRequest;
+                                        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+                                        message.content_length += sizeof(ServerMessageType);
+
+                                        // ===== Set ID to request =====
+                                        memcpy(&message.content[sizeof(ServerMessageType)], &user_id, sizeof(UserID));
+                                        message.content_length += sizeof(UserID);
+
+                                        // ===== Send Message =====
+                                        int send_flags = 0;
+                                        send(user_client.client_socket, (char*)&message, sizeof(Message), send_flags);
+
+                                        // ===== Set to temp name so that we dont request multiple times.
+                                        user.user_name = "Looking Up...";
+
+                                        continue;
+                                }
+
+                                ImGui::PushID(i);
+
+                                ImGui::BeginChild("##users", ImVec2{ ImGui::GetContentRegionAvail().x, 100 }, child_flags);
+
+                                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.6f, 0.8f, 1.0f));
+                                ImGui::Text(user.user_name.c_str());
+                                ImGui::PopStyleColor();
+
+                                ImGui::EndChild();
+
+                                ImGui::PopID();
+                        }
                 }
                 ImGui::EndChild();
 

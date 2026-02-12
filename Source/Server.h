@@ -27,20 +27,6 @@ NOTES:
         admins, and the user that created the channel defaults to an admin and can set other users as admins.
 */
 
-#define MAX_CHANNEL_USER_COUNT    1'000
-#define MAX_CHANNEL_MESSAGE_COUNT 100
-#define MAX_CHANNEL_COUNT         10
-
-// Server stores all messages and information on RAM, can move this to a database and then have it be persistent between runs, and also allows more
-// messages to be stored.
-struct Channel {
-        u32    user_count{};
-        UserID users[MAX_CHANNEL_USER_COUNT];
-
-        u32     message_count{};
-        Message messages[MAX_CHANNEL_MESSAGE_COUNT];
-};
-
 struct Server {
         // NOTE: Add flag to allow only a local server.
         void Init();
@@ -48,18 +34,16 @@ struct Server {
 
         void Run();
 
+        void AddUserToChannel(ChannelID channel_id, UserID new_user_id);
+
         WSADATA wsa_data;
         SOCKET  listener_socket{ INVALID_SOCKET };
 
         int         client_count{};
         std::thread client_threads[max_clients];
 
-        std::unordered_map<UserID, SOCKET>      user_sockets;
-        std::unordered_map<UserID, std::string> user_names;
-
-        // Needs to either be map or have a seperate lookup into this array for ChannelID to index. (just use a map to store channels);
-        u32     channel_count{};
-        Channel channels[MAX_CHANNEL_COUNT];
+        std::unordered_map<UserID, User>       users;
+        std::unordered_map<ChannelID, Channel> channels;
 
         bool running;
 };
