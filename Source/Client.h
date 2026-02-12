@@ -19,6 +19,7 @@ struct Client {
 
         // ===== Functions to process messages from the server =====
         void ProcessMessages();
+        void ProcessServerMessage(const Message& message);
 
         // ===== Util functions =====
         void AddChannel(ChannelID id, const std::string& channel_name);
@@ -28,11 +29,10 @@ struct Client {
         SOCKET  client_socket{ INVALID_SOCKET };
 
         // ===== Channels Info =====
-        u32         channel_count{};
-        ChannelID   chat_channels[MAX_CHAT_CHANNEL_COUNT]{};
-        std::string chat_channel_names[MAX_CHAT_CHANNEL_COUNT]{};
+        u32                                    channel_count{};
+        ChannelID                              chat_channels[MAX_CHAT_CHANNEL_COUNT]{};
+        std::unordered_map<ChannelID, Channel> channels{};
 
-        // ===== Per Channel Info =====
-        std::unordered_map<ChannelID, std::vector<UserID>>  channel_users{};
-        std::unordered_map<ChannelID, std::vector<Message>> channel_messages{};
+        // ===== User Data =====
+        std::unordered_map<UserID, User> users{};
 };

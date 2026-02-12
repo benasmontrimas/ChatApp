@@ -9,6 +9,15 @@ enum ReservedChannelIDs : ChannelID {
         ChannelIDUser = 100, // Start user IDs at 100. Leaves ChatIDs 0 - 99, for other internal uses.
 };
 
+enum ServerMessageType : u32 {
+        MessageUserListSync,
+        MessageUserJoin,
+        MessageUserLeave,
+        MessageUserNameRequest,
+        MessageUserNameSend,
+
+};
+
 struct Message {
         UserID    sender;                         // Set by server
         ChannelID channel;                        // Set by client

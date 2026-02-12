@@ -122,16 +122,83 @@ void Client::ProcessMessages() {
                 int recieve_flags = 0;
                 res               = recv(client_socket, (char*)&message, sizeof(message), recieve_flags);
 
-                std::println("Recieved Message");
+                if (message.sender == 0) {
+                        // ===== Proccess Message from Server ======
+                        ProcessServerMessage(message);
+                } else {
+                        // ===== Proccess Message from Users ======
+                        Channel& channel                        = channels[message.channel];
+                        channel.messages[channel.message_count] = message;
+                        channel.message_count++;
+                }
+        }
+}
 
-                // message.sender, channel, timestamp, content_length, content,
+void Client::ProcessServerMessage(const Message& message) {
+        assert(message.sender == 0);
 
-                channel_messages[message.channel].push_back(message);
+        ServerMessageType message_type{};
+        memcpy(&message_type, &message.content[0], sizeof(ServerMessageType));
+
+        switch (message_type) {
+        case MessageUserListSync: {
+                // ===== Update All Users In All Channels =====
+                Channel& channel = channels[message.channel];
+
+                std::println("Channel: {}", message.channel);
+
+                u32 user_count = (message.content_length - sizeof(ServerMessageType)) / sizeof(UserID);
+
+                for (u32 i = 0; i < user_count; i++) {
+                        u32 index_into_content = i * sizeof(UserID) + sizeof(ServerMessageType);
+
+                        UserID user_id;
+                        memcpy(&user_id, &message.content[index_into_content], sizeof(UserID));
+
+                        bool exists = false;
+                        for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
+                                UserID existing_user_id = channel.users[user_idx];
+                                if (user_id == existing_user_id) {
+                                        exists = true;
+                                }
+                        }
+
+                        if (exists) continue;
+                        message.content[sizeof(ServerMessageType) + sizeof(UserID)];
+                        channel.users[channel.user_count] = user_id;
+                        channel.user_count++;
+                }
+
+        } break;
+        case MessageUserJoin: {
+                // ===== Add User to Channel =====
+                Channel& channel = channels[message.channel];
+
+                UserID new_user;
+                memcpy(&new_user, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
+
+                channel.users[channel.user_count] = new_user;
+                channel.user_count++;
+        } break;
+        case MessageUserLeave: {
+                // ===== Remove User to Channel =====
+        } break;
+        case MessageUserNameSend: {
+                // ===== UserID User Name =====
+                UserID user_id;
+                memcpy(&user_id, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
+
+                u32 user_name_length = message.content_length - (sizeof(ServerMessageType) + sizeof(UserID));
+                users[user_id].user_name.assign(&message.content[sizeof(ServerMessageType) + sizeof(UserID)], user_name_length);
+
+                std::println("Trying to read Username: {}, With length: {}", users[user_id].user_name, user_name_length);
+        } break;
         }
 }
 
 void Client::AddChannel(ChannelID id, const std::string& channel_name) {
-        chat_channels[channel_count]      = id;
-        chat_channel_names[channel_count] = channel_name;
+        chat_channels[channel_count] = id;
         channel_count++;
+
+        channels[id].name = channel_name;
 }
