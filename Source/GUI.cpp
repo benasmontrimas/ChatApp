@@ -561,17 +561,24 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 static float message_scroll_position = -1.0f;
 
+float GetTextHeight(const char* text, float wrap_width) {
+        ImVec2 single_line_height = ImGui::CalcTextSize("Hello");
+        ImVec2 message_text_size = ImGui::CalcTextSize(text, NULL, false, wrap_width);
+
+        return single_line_height.y + (single_line_height.y) * (message_text_size.y / single_line_height.y);
+}
+
 void ChatAppGUI() {
         // TODO: Check Server is still running, if not throw an error modal with a refresh button to allow checking.
 
         // Need to negate so we can use as a ptr to open popup.
-        static bool   not_logged_in = true;
-        static char   user_name[64] = {};
-        static Client user_client{};
-        static u32    current_channel_id = ChannelIDGlobal;
-        static char   input_buffer[512]{};  // TODO: Store somewhere else.
-        static u32    last_message_count{}; // Used for checking if theres new messages
-        static bool   last_was_at_bottom{};
+        static bool      not_logged_in = true;
+        static char      user_name[64] = {};
+        static Client    user_client{};
+        static ChannelID current_channel_id = ChannelIDGlobal;
+        static char      input_buffer[512]{};  // TODO: Store somewhere else.
+        static u32       last_message_count{}; // Used for checking if theres new messages
+        static bool      last_was_at_bottom{};
 
         // ===== LOG IN =====
 
@@ -648,7 +655,9 @@ void ChatAppGUI() {
 
                                 ImGui::PushID(i);
 
-                                ImGui::BeginChild("##channels", ImVec2{ ImGui::GetContentRegionAvail().x, channel_text_size.y + 30 }, child_flags);
+                                float channel_height = GetTextHeight(user_client.channels[chat_channel_id].name.c_str(), ImGui::GetContentRegionAvail().x);
+
+                                ImGui::BeginChild("##channels", ImVec2{ ImGui::GetContentRegionAvail().x, channel_height }, child_flags);
 
                                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.3f, 1.0f));
                                 ImGui::Text(user_client.channels[chat_channel_id].name.c_str());
@@ -674,7 +683,7 @@ void ChatAppGUI() {
 
                         // ===== MESSAGES =====
 
-                        ImGui::SeparatorText("Global Chat");
+                        ImGui::SeparatorText(user_client.channels[current_channel_id].name.c_str());
 
                         ImVec2 messages_size = ImGui::GetContentRegionAvail();
                         messages_size.y -= 100;
@@ -692,14 +701,20 @@ void ChatAppGUI() {
                                 for (u32 i = 0; i < message_count; i++) {
                                         const User& user = user_client.users[messages[i].sender];
 
-                                        ImVec2 user_text_size = ImGui::CalcTextSize(user.user_name.c_str());
+                                        ImVec2 user_text_size     = ImGui::CalcTextSize(user.user_name.c_str());
+                                        ImVec2 single_line_height = ImGui::CalcTextSize("Hello");
                                         ImVec2 message_text_size =
                                                 ImGui::CalcTextSize(messages[i].content, NULL, false, ImGui::GetContentRegionAvail().x - user_text_size.x - 40);
 
                                         ImGui::PushID(i);
 
-                                        // TODO: Scaling is broken, need to find good values for different windows scales, for 1.5 worked good but not for 1.0
-                                        ImGui::BeginChild("##messages", ImVec2{ ImGui::GetContentRegionAvail().x, message_text_size.y  * 2.0f }, child_flags);
+                                        float message_height = GetTextHeight(messages[i].content, ImGui::GetContentRegionAvail().x - user_text_size.x - 40);
+
+                                        ImGui::BeginChild(
+                                                "##messages",
+                                                ImVec2{ ImGui::GetContentRegionAvail().x,
+                                                        message_height },
+                                                child_flags);
 
                                         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.3f, 1.0f));
                                         ImGui::TextWrapped(user.user_name.c_str());
@@ -769,9 +784,6 @@ void ChatAppGUI() {
 
                                 ImGui::SameLine();
                                 if (ImGui::Button("SEND", ImGui::GetContentRegionAvail())) {
-                                        // TODO: Send message in input_buffer.
-                                        // TODO: Check which channel we are in.
-
                                         if (strlen(input_buffer) != 0) user_client.SendMessage(ChannelIDGlobal, input_buffer);
 
                                         std::memset(input_buffer, 0, 512);
@@ -793,13 +805,6 @@ void ChatAppGUI() {
                 ImGui::BeginChild("MembersPanel", members_channel_size, child_flags);
                 {
                         ImGui::Text("Members");
-
-                        // ===== TODO =====
-                        // On changeing channel, send request for how many messages in that channel.
-                        // If we have cached the same number we should be ok, maybe want to check most recent?
-                        // Otherwise we can reserve how many there should be and then request for the messages that we dont have.
-                        // if we add message deletion this becomes a bit more difficult, unless we store some empty message for deleted messages.
-                        // Can have like a server user which can print server messages.
 
                         Channel& channel = user_client.channels[current_channel_id];
 
@@ -831,10 +836,11 @@ void ChatAppGUI() {
 
                                         continue;
                                 }
+                                float channel_height = GetTextHeight(user.user_name.c_str(), ImGui::GetContentRegionAvail().x);
 
                                 ImGui::PushID(i);
 
-                                ImGui::BeginChild("##users", ImVec2{ ImGui::GetContentRegionAvail().x, 100 }, child_flags);
+                                ImGui::BeginChild("##users", ImVec2{ ImGui::GetContentRegionAvail().x, channel_height }, child_flags);
 
                                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.6f, 0.8f, 1.0f));
                                 ImGui::Text(user.user_name.c_str());

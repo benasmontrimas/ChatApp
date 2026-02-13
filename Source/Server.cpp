@@ -1,7 +1,7 @@
 #include "Server.h"
 
-void SyncUsers(Server* server, User user);
-void SendUserName(Server* server, User sender_user, UserID wanted_user_id);
+void SyncUsers(Server* server, User& user);
+void SendUserName(Server* server, User& sender_user, UserID wanted_user_id);
 
 void Server::Init() {
         int res;
@@ -76,7 +76,7 @@ void Server::Shutdown() {
         WSACleanup();
 }
 
-void ProcessMessage(Server* server, User user, Message& message) {
+void ProcessMessage(Server* server, User& user, Message& message) {
         switch (message.channel) {
         case ChannelIDServer: {
                 // ===== Handle Server Message =====
@@ -139,7 +139,7 @@ u32: MesageType = ConnectedUsers
 u32: ChannelID
 u32: UserID[]
 */
-void SyncUsers(Server* server, User user) {
+void SyncUsers(Server* server, User& user) {
         Message message{};
         message.sender         = 0; // Not used - If we reserve 0 for server this can be useful
         message.timestamp      = 0;
@@ -183,7 +183,7 @@ void SyncUsers(Server* server, User user) {
         }
 }
 
-void SendUserName(Server* server, User sender_user, UserID wanted_user_id) {
+void SendUserName(Server* server, User& sender_user, UserID wanted_user_id) {
         Message message{};
         message.sender    = 0;
         message.timestamp = 0;
@@ -208,10 +208,79 @@ void SendUserName(Server* server, User sender_user, UserID wanted_user_id) {
         send(sender_user.socket, (char*)&message, sizeof(Message), send_flags);
 }
 
+void SendUserJoin(Server* server, User& user) {
+        Message message{};
+        // Could use this as the user which was added, but we set to 0 to mark as server message
+        message.sender    = 0;
+        message.timestamp = 0;
+
+        // ===== Write Message Type =====
+        ServerMessageType message_type = MessageUserJoin;
+        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+        message.content_length += sizeof(ServerMessageType);
+
+        // ===== Write User ID =====
+        memcpy(&message.content[sizeof(ServerMessageType)], &user.id, sizeof(UserID));
+        message.content_length += sizeof(UserID);
+
+        // ===== Send a Message for Each Channel =====
+        for (u32 channel_idx = 0; channel_idx < user.channel_count; channel_idx++) {
+                ChannelID channel_id = user.channels[channel_idx];
+
+                message.channel = channel_id;
+
+                // ===== Send a message to each User in the Channel =====
+                Channel channel = server->channels[channel_id];
+                for (u32 channel_user_idx = 0; channel_user_idx < channel.user_count; channel_user_idx++) {
+                        UserID user_id      = channel.users[channel_user_idx];
+                        User   channel_user = server->users[user_id];
+
+                        // ===== Send Message =====
+                        int send_flags = 0;
+                        send(channel_user.socket, (char*)&message, sizeof(Message), send_flags);
+                }
+        }
+}
+
+void SendUserLeave(Server* server, User& user) {
+        Message message{};
+        // Could use this as the user which was added, but we set to 0 to mark as server message
+        message.sender    = 0;
+        message.timestamp = 0;
+
+        // ===== Write Message Type =====
+        ServerMessageType message_type = MessageUserLeave;
+        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+        message.content_length += sizeof(ServerMessageType);
+
+        // ===== Write User ID =====
+        memcpy(&message.content[sizeof(ServerMessageType)], &user.id, sizeof(UserID));
+        message.content_length += sizeof(UserID);
+
+        // ===== Send a Message for Each Channel =====
+        for (u32 channel_idx = 0; channel_idx < user.channel_count; channel_idx++) {
+                ChannelID channel_id = user.channels[channel_idx];
+
+                message.channel = channel_id;
+
+                // ===== Send a message to each User in the Channel =====
+                Channel channel = server->channels[channel_id];
+                for (u32 channel_user_idx = 0; channel_user_idx < channel.user_count; channel_user_idx++) {
+                        UserID user_id      = channel.users[channel_user_idx];
+                        User   channel_user = server->users[user_id];
+
+                        // ===== Send Message =====
+                        int send_flags = 0;
+                        send(channel_user.socket, (char*)&message, sizeof(Message), send_flags);
+                }
+        }
+}
+
 // NOTE: Send message to all client to tell them the server is down.
-void ProcessClient(Server* server, User user, bool& running) {
+void ProcessClient(Server* server, User& user, bool& running) {
         int res;
 
+        SendUserJoin(server, user);
         SyncUsers(server, user);
 
         Message message;
@@ -239,13 +308,31 @@ void ProcessClient(Server* server, User user, bool& running) {
                 } else { // Error
                         std::println("Recieve failed");
                         closesocket(user.socket);
-                        return;
+                        break;
                 }
         }
 
         closesocket(user.socket);
+
+        // ===== Send Leave Message =====
+        // NOTE: MUST BE BEFORE WE TRY REMOVE!
+        SendUserLeave(server, user);
+
+        // ===== Remove from all channels =====
+        for (u32 channel_idx = 0; channel_idx < user.channel_count; channel_idx++) {
+                ChannelID channel_id = user.channels[channel_idx];
+                Channel&  channel    = server->channels[channel_id];
+
+                for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
+                        UserID user_id = channel.users[user_idx];
+                        if (user_id != user.id) continue;
+
+                        channel.user_count--;
+                        channel.users[channel_idx] = channel.users[channel.user_count];
+                        break;
+                }
+        }
         server->users.erase(user.id);
-        // TODO: Remove user from all channels, and send message to all users that the user has left.
 }
 
 void Server::AddUserToChannel(ChannelID channel_id, UserID new_user_id) {
@@ -317,7 +404,7 @@ void Server::Run() {
                 AddUserToChannel(ChannelIDGlobal, client_id);
 
                 // ===== Assign Client to thread =====
-                client_threads[client_count] = std::thread(&ProcessClient, this, users[client_id], std::ref(running));
+                client_threads[client_count] = std::thread(&ProcessClient, this, std::ref(users[client_id]), std::ref(running));
                 client_count++;
         }
 }

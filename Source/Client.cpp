@@ -177,11 +177,24 @@ void Client::ProcessServerMessage(const Message& message) {
                 UserID new_user;
                 memcpy(&new_user, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
 
+                // TODO: Do we need to check if the user already exists?
                 channel.users[channel.user_count] = new_user;
                 channel.user_count++;
         } break;
         case MessageUserLeave: {
                 // ===== Remove User to Channel =====
+                Channel& channel = channels[message.channel];
+
+                UserID leaving_user;
+                memcpy(&leaving_user, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
+
+                for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
+                        if (channel.users[user_idx] != leaving_user) continue;
+
+                        channel.user_count--;
+                        channel.users[user_idx] = channel.users[channel.user_count];
+                        break;
+                }
         } break;
         case MessageUserNameSend: {
                 // ===== UserID User Name =====
