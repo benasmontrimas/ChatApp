@@ -5,5 +5,3 @@
         - Channels need a leave button, but block this action on global as otherwise the user cant
         access anyone.
 
-- Fix box sizes for channels and users.
-        - Create get text size function.

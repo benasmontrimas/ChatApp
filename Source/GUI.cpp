@@ -8,6 +8,8 @@
 
 #include "GUI.h"
 #include "Client.h"
+#include "fmod.hpp"
+#include "fmod_errors.h"
 
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
@@ -110,9 +112,21 @@ void           WaitForPendingOperations();
 FrameContext*  WaitForNextFrameContext();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-void ChatAppGUI();
+void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound);
 
-// Main code
+FMOD::System* InitFMOD() {
+        FMOD::System* sound_system;
+        FMOD::System_Create(&sound_system);
+        sound_system->init(512, FMOD_INIT_NORMAL, NULL);
+
+        return sound_system;
+}
+
+void DeinitFMOD(FMOD::System* sound_system) {
+        sound_system->close();
+        sound_system->release();
+}
+
 int GUI() {
         // Make process DPI aware and obtain main monitor scale
         ImGui_ImplWin32_EnableDpiAwareness();
@@ -151,10 +165,55 @@ int GUI() {
 
         // Setup scaling
         ImGuiStyle& style = ImGui::GetStyle();
-        style.ScaleAllSizes(main_scale); // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting
+        // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting
                                          // Style + calling this again)
+        style.ScaleAllSizes(main_scale);
+                                         // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this unnecessary. We leave both here for documentation purpose)
         style.FontScaleDpi =
-                main_scale; // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this unnecessary. We leave both here for documentation purpose)
+                main_scale;
+
+        style.ChildBorderSize = 1.0f;
+
+        style.WindowRounding = 6.0f;
+        style.ChildRounding = 6.0f;
+        style.FrameRounding = 6.0f;
+
+        style.PopupRounding = 6.0f;
+        style.PopupBorderSize = 0.0f;
+
+        style.ItemSpacing = ImVec2{12, 0};
+
+        style.SelectableTextAlign = ImVec2{0.5f, 0.5f};
+
+        style.SeparatorTextBorderSize = 1.0f;
+        style.SeparatorTextAlign = {0.05f, 0.5f};
+        style.SeparatorTextPadding = {0, 0};
+        style.ItemSpacing = {8, 1};
+        style.WindowPadding = {12, 12};
+
+        // ===== Colours =====
+        style.Colors[ImGuiCol_ChildBg] = ImVec4{0.25f, 0.25f, 0.3f, 1.0f};
+        style.Colors[ImGuiCol_PopupBg] = ImVec4{0.4f, 0.4f, 0.4f, 0.8f};
+        style.Colors[ImGuiCol_Border] = ImVec4{0.0f, 0.0f, 0.0f, 0.0f};
+
+        style.Colors[ImGuiCol_FrameBg] = ImVec4{0.5f, 0.5f, 1.0f, 0.5f};
+        style.Colors[ImGuiCol_FrameBgHovered] = ImVec4{0.5f, 0.5f, 1.0f, 1.0f};
+        style.Colors[ImGuiCol_FrameBgActive] = ImVec4{0.5f, 0.5f, 1.0f, 0.75f};
+
+        style.Colors[ImGuiCol_ScrollbarBg] = ImVec4{0.0f, 0.0f, 0.0f, 0.0f};
+        style.Colors[ImGuiCol_ScrollbarBg] = ImVec4{0.4f, 0.4f, 0.4f, 1.0f};
+        style.Colors[ImGuiCol_ScrollbarBg] = ImVec4{0.5f, 0.5f, 0.5f, 1.0f};
+        style.Colors[ImGuiCol_ScrollbarBg] = ImVec4{0.55f, 0.55f, 0.55f, 1.0f};
+
+        style.Colors[ImGuiCol_Button] = ImVec4{0.55f, 0.55f, 1.0f, 0.8f};
+        style.Colors[ImGuiCol_ButtonHovered] = ImVec4{0.55f, 0.55f, 1.0f, 0.9f};
+        style.Colors[ImGuiCol_ButtonActive] = ImVec4{0.55f, 0.55f, 1.0f, 1.0f};
+
+        style.Colors[ImGuiCol_Header] = ImVec4{0.0f, 0.0f, 0.0f, 0.0f};
+        style.Colors[ImGuiCol_HeaderHovered] = ImVec4{1.0f, 1.0f, 1.0f, 0.1f};
+        style.Colors[ImGuiCol_HeaderActive] = ImVec4{1.0f, 1.0f, 1.0f, 0.2f};
+
+        style.Colors[ImGuiCol_Separator] = ImVec4{1.0f, 1.0f, 1.0f, 0.5f};
 
         // Setup Platform/Renderer backends
         ImGui_ImplWin32_Init(hwnd);
@@ -179,12 +238,16 @@ int GUI() {
 
         style.FontSizeBase = 20.0f;
         main_font          = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
-        message_font       = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", 14.0f);
 
         // Our state
         bool   show_demo_window    = true;
         bool   show_another_window = false;
         ImVec4 clear_color         = ImVec4(0.15f, 0.15f, 0.10f, 1.00f);
+
+        // Sound
+        FMOD::System* sound_system = InitFMOD();
+        FMOD::Sound*  sound        = NULL;
+        sound_system->createSound("Assets/sound.mp3", FMOD_LOOP_OFF, NULL, &sound);
 
         // Main loop
         bool done = false;
@@ -213,52 +276,11 @@ int GUI() {
 
 
                 // ================ IMGUI DEMO ======================
-
-
-                // // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about
-                // // DearImGui!). if (show_demo_window)
+                // Useful for styling
                 // ImGui::ShowDemoWindow(&show_demo_window);
 
-                // // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-                // {
-                //         static float f       = 0.0f;
-                //         static int   counter = 0;
-
-                //         ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
-
-                //         ImGui::Text("This is some useful text.");          // Display some text (you can use a format strings too)
-                //         ImGui::Checkbox("Demo Window", &show_demo_window); // Edit bools storing our window open/close state
-                //         ImGui::Checkbox("Another Window", &show_another_window);
-
-                //         ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-                //         ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-                //         if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
-                //                 counter++;
-                //         ImGui::SameLine();
-                //         ImGui::Text("counter = %d", counter);
-
-                //         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-                //         ImGui::End();
-                // }
-
-                // // 3. Show another simple window.
-                // if (show_another_window) {
-                //         ImGui::Begin("Another Window", &show_another_window); // Pass a pointer to our bool variable (the window will have a closing
-                //         // buttonthat
-                //                                                               // will clear the bool when clicked)
-                //         ImGui::Text("Hello from another window!");
-                //         if (ImGui::Button("Close Me")) show_another_window = false;
-                //         ImGui::End();
-                // }
-
-
-                // ================ IMGUI DEMO ======================
                 // ================== MY UI =========================
-
-                ChatAppGUI();
-
-                // ================== MY UI =========================
+                ChatAppGUI(sound_system, sound);
 
                 // Rendering
                 ImGui::Render();
@@ -310,6 +332,9 @@ int GUI() {
         CleanupDeviceD3D();
         ::DestroyWindow(hwnd);
         ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
+
+        sound->release();
+        DeinitFMOD(sound_system);
 
         return 0;
 }
@@ -563,22 +588,30 @@ static float message_scroll_position = -1.0f;
 
 float GetTextHeight(const char* text, float wrap_width) {
         ImVec2 single_line_height = ImGui::CalcTextSize("Hello");
-        ImVec2 message_text_size = ImGui::CalcTextSize(text, NULL, false, wrap_width);
+        ImVec2 message_text_size  = ImGui::CalcTextSize(text, NULL, false, wrap_width);
 
         return single_line_height.y + (single_line_height.y) * (message_text_size.y / single_line_height.y);
 }
 
-void ChatAppGUI() {
+void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound) {
         // TODO: Check Server is still running, if not throw an error modal with a refresh button to allow checking.
 
         // Need to negate so we can use as a ptr to open popup.
-        static bool      not_logged_in = true;
-        static char      user_name[64] = {};
-        static Client    user_client{};
-        static ChannelID current_channel_id = ChannelIDGlobal;
-        static char      input_buffer[512]{};  // TODO: Store somewhere else.
-        static u32       last_message_count{}; // Used for checking if theres new messages
-        static bool      last_was_at_bottom{};
+        static bool                                 not_logged_in     = true;
+        static bool                                 failed_to_connect = true;
+        static char                                 user_name[64]     = {};
+        static Client                               user_client{};
+        static ChannelID                            current_channel_id = ChannelIDGlobal;
+        static char                                 input_buffer[512]{};  // TODO: Store somewhere else.
+        static u32                                  last_message_count{}; // Used for checking if theres new messages
+        static bool                                 last_was_at_bottom{};
+        static std::unordered_map<UserID, float[3]> user_colours{};
+        static std::unordered_map<ChannelID, u32>   last_read_message{};
+        static std::unordered_map<ChannelID, u32>   last_notified_message{};
+
+        std::srand((u32)std::time(nullptr));
+
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
 
         // ===== LOG IN =====
 
@@ -590,6 +623,8 @@ void ChatAppGUI() {
         login_window_flags |= ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar;
         login_window_flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoCollapse;
 
+        ImGui::SetNextWindowSize(viewport->Size);
+
         if (ImGui::BeginPopupModal("LoginPopup", &not_logged_in, login_window_flags)) {
                 ImGui::Text("Username:");
                 ImGui::InputText("##Username:", user_name, 64);
@@ -598,19 +633,71 @@ void ChatAppGUI() {
                         not_logged_in = false;
 
                         if (user_client.Init() != ReturnCode::Success) {
-                                // TODO: Handle this case.
                                 std::println("Server might be down!");
-                                exit(0);
+
+                        } else {
+                                user_client.SendUserName(std::string(user_name));
+
+                                failed_to_connect = false;
                         }
-
-                        user_client.SendUserName(std::string(user_name));
-
-                        user_client.AddChannel(ChannelIDGlobal, "Global Chat");
-                        // TODO: Need to request all messages from before this client joined.
                 }
 
                 ImGui::EndPopup();
                 return;
+        }
+
+
+        if (!failed_to_connect) {
+                // ===== Check Server Is Available =====
+                if (user_client.Ping() != ReturnCode::Success) failed_to_connect = true;
+        }
+
+        if (failed_to_connect) {
+                if (!ImGui::IsPopupOpen("FailedConnectingPopup")) ImGui::OpenPopup("FailedConnectingPopup");
+        }
+
+        // ===== Reconnect to Server =====
+
+        ImGui::SetNextWindowSize(viewport->Size);
+
+        if (ImGui::BeginPopupModal("FailedConnectingPopup", &failed_to_connect, login_window_flags)) {
+                ImGui::Text("Failed to connect to server. It Might be down.");
+
+                if (ImGui::Button("Retry")) {
+                        if (user_client.Reconnect() != ReturnCode::Success) {
+                                std::println("Server might be down!");
+                        } else {
+                                // Reset the channels, we can keep global messages but private channels are broken with server change.
+                                user_client.channel_count = 1;
+                                Channel channel = user_client.channels[ChannelIDGlobal]; // Copy global
+                                user_client.channels.clear();
+                                user_client.channels[ChannelIDGlobal] = channel;
+
+                                current_channel_id = ChannelIDGlobal;
+
+                                user_client.SendUserName(std::string(user_name));
+                                failed_to_connect = false;
+                        }
+                }
+
+                ImGui::EndPopup();
+                return;
+        }
+
+        // ===== Notify if new messages =====
+        for (u32 channel_idx = 0; channel_idx < user_client.channel_count; channel_idx++) {
+                ChannelID channel_id = user_client.chat_channels[channel_idx];
+                Channel& channel = user_client.channels[channel_id];
+
+                if (channel.message_count > last_notified_message[channel_id]) {
+                        if (channel_id == current_channel_id and last_read_message[current_channel_id] == channel.message_count) {
+                                // ===== Dont Send Notification If We Are Looking At It =====
+                        } else {
+                                sound_system->playSound(notification_sound, NULL, false, nullptr);
+                        }
+                }
+
+                last_notified_message[channel_id] = channel.message_count;
         }
 
         // ===== Chat App =====
@@ -620,8 +707,6 @@ void ChatAppGUI() {
         window_flags |= ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar;
         window_flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoCollapse;
         window_flags |= ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus;
-
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
 
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(viewport->Size);
@@ -641,6 +726,7 @@ void ChatAppGUI() {
                 ImGui::BeginChild("ChatChannels", chat_channel_size, child_flags);
                 {
                         ImGui::Text("Channels");
+                        ImGui::Separator();
 
                         // ===== TODO =====
                         // On changeing channel, send request for how many messages in that channel.
@@ -658,9 +744,42 @@ void ChatAppGUI() {
                                 float channel_height = GetTextHeight(user_client.channels[chat_channel_id].name.c_str(), ImGui::GetContentRegionAvail().x);
 
                                 ImGui::BeginChild("##channels", ImVec2{ ImGui::GetContentRegionAvail().x, channel_height }, child_flags);
+                                if (ImGui::BeginPopupContextWindow()) {
+                                        ImGuiStyle* style = &ImGui::GetStyle();
+
+                                        ImGuiSelectableFlags selectable_flag = 0;
+
+                                        // ===== Dont Allow Leaving Global =====
+                                        if (chat_channel_id == ChannelIDGlobal) {
+                                                ImGui::PushStyleColor(ImGuiCol_Text, style->Colors[ImGuiCol_TextDisabled]);
+                                                selectable_flag |= ImGuiSelectableFlags_Disabled;
+                                        }
+
+                                        if (ImGui::Selectable("Leave", false, selectable_flag)) {
+                                                // ===== Leave Channel =====
+                                                user_client.LeaveChannel(chat_channel_id);
+
+                                                // ===== Switch To Global If This Was Active ======
+                                                if (chat_channel_id == current_channel_id) current_channel_id = ChannelIDGlobal;
+                                        }
+
+                                        if (chat_channel_id == ChannelIDGlobal) ImGui::PopStyleColor();
+
+                                        ImGui::EndPopup();
+                                }
 
                                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.3f, 1.0f));
-                                ImGui::Text(user_client.channels[chat_channel_id].name.c_str());
+
+                                std::string channel_text = user_client.channels[chat_channel_id].name;
+
+                                if (last_read_message[chat_channel_id] != user_client.channels[chat_channel_id].message_count) {
+                                        channel_text += "*";
+                                }
+
+                                if (ImGui::Selectable(channel_text.c_str(), current_channel_id == chat_channel_id)) {
+                                        current_channel_id = chat_channel_id;
+                                }
+
                                 ImGui::PopStyleColor();
 
                                 ImGui::EndChild();
@@ -683,7 +802,8 @@ void ChatAppGUI() {
 
                         // ===== MESSAGES =====
 
-                        ImGui::SeparatorText(user_client.channels[current_channel_id].name.c_str());
+                        ImGui::Text(user_client.channels[current_channel_id].name.c_str());
+                        ImGui::Separator();
 
                         ImVec2 messages_size = ImGui::GetContentRegionAvail();
                         messages_size.y -= 100;
@@ -699,7 +819,14 @@ void ChatAppGUI() {
                                 u32      message_count = user_client.channels[current_channel_id].message_count;
 
                                 for (u32 i = 0; i < message_count; i++) {
-                                        const User& user = user_client.users[messages[i].sender];
+                                        // ===== Server Messages =====
+                                        if (messages[i].sender == 0) {
+                                                ImGui::SeparatorText(messages[i].content);
+                                                continue;
+                                        }
+
+                                        // ===== Actual Messages ======
+                                        User& user = user_client.users[messages[i].sender];
 
                                         ImVec2 user_text_size     = ImGui::CalcTextSize(user.user_name.c_str());
                                         ImVec2 single_line_height = ImGui::CalcTextSize("Hello");
@@ -710,13 +837,18 @@ void ChatAppGUI() {
 
                                         float message_height = GetTextHeight(messages[i].content, ImGui::GetContentRegionAvail().x - user_text_size.x - 40);
 
-                                        ImGui::BeginChild(
-                                                "##messages",
-                                                ImVec2{ ImGui::GetContentRegionAvail().x,
-                                                        message_height },
-                                                child_flags);
+                                        ImGui::BeginChild("##messages", ImVec2{ ImGui::GetContentRegionAvail().x, message_height }, child_flags);
 
-                                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.3f, 1.0f));
+                                        if (!user_colours.contains(user.id)) {
+                                                std::srand((u32)std::time(nullptr));
+                                                user_colours[user.id][0] = 0.5f + (float(std::rand() % 1'000) / 2'000);
+                                                user_colours[user.id][1] = 0.5f + (float(std::rand() % 1'000) / 2'000);
+                                                user_colours[user.id][2] = 0.5f + (float(std::rand() % 1'000) / 2'000);
+                                        }
+
+                                        float* c = user_colours[user.id];
+
+                                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(c[0], c[1], c[2], 1.0f));
                                         ImGui::TextWrapped(user.user_name.c_str());
                                         ImGui::PopStyleColor();
 
@@ -755,6 +887,11 @@ void ChatAppGUI() {
                                 ImGui::SetScrollY(message_scroll_position);
 
                                 last_message_count = message_count;
+
+                                if (message_scroll_position >= ImGui::GetScrollMaxY()) {
+                                        // ===== Set Messages Read as Up-To-Date =====
+                                        last_read_message[current_channel_id] = message_count;
+                                }
                         }
                         ImGui::EndChild();
 
@@ -771,7 +908,7 @@ void ChatAppGUI() {
                                                 input_buffer[end]     = '\n';
                                                 input_buffer[end + 1] = 0;
                                         } else if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
-                                                if (strlen(input_buffer) != 0) user_client.SendMessage(ChannelIDGlobal, input_buffer);
+                                                if (strlen(input_buffer) != 0) user_client.SendMessage(current_channel_id, input_buffer);
 
                                                 std::memset(input_buffer, 0, 512);
                                                 if (ImGuiInputTextState * state{ ImGui::GetInputTextState(ImGui::GetItemID()) })
@@ -784,7 +921,7 @@ void ChatAppGUI() {
 
                                 ImGui::SameLine();
                                 if (ImGui::Button("SEND", ImGui::GetContentRegionAvail())) {
-                                        if (strlen(input_buffer) != 0) user_client.SendMessage(ChannelIDGlobal, input_buffer);
+                                        if (strlen(input_buffer) != 0) user_client.SendMessage(current_channel_id, input_buffer);
 
                                         std::memset(input_buffer, 0, 512);
                                         if (ImGuiInputTextState * state{ ImGui::GetInputTextState(ImGui::GetItemID()) }) state->ReloadUserBufAndSelectAll();
@@ -805,6 +942,7 @@ void ChatAppGUI() {
                 ImGui::BeginChild("MembersPanel", members_channel_size, child_flags);
                 {
                         ImGui::Text("Members");
+                        ImGui::Separator();
 
                         Channel& channel = user_client.channels[current_channel_id];
 
@@ -841,8 +979,55 @@ void ChatAppGUI() {
                                 ImGui::PushID(i);
 
                                 ImGui::BeginChild("##users", ImVec2{ ImGui::GetContentRegionAvail().x, channel_height }, child_flags);
+                                if (ImGui::BeginPopupContextWindow()) {
+                                        ImGuiStyle* style = &ImGui::GetStyle();
 
-                                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.6f, 0.8f, 1.0f));
+                                        ImGuiSelectableFlags selectable_flag = 0;
+
+                                        // ===== Dont allow Private Messaging yourself =====
+                                        if (user_id == user_client.id) {
+                                                ImGui::PushStyleColor(ImGuiCol_Text, style->Colors[ImGuiCol_TextDisabled]);
+                                                selectable_flag |= ImGuiSelectableFlags_Disabled;
+                                        }
+
+                                        if (ImGui::Selectable("Private Message", false, selectable_flag)) {
+                                                // ===== Check if Already Exists =====
+                                                bool channel_found = false;
+                                                for (u32 channel_idx = 0; channel_idx < user_client.channel_count; channel_idx++) {
+                                                        ChannelID channel_id = user_client.chat_channels[channel_idx];
+                                                        // ===== Dont check global channel (Could check channels with ID >= ChannelIDUser) =====
+                                                        if (channel_id == ChannelIDGlobal) continue;
+                                                        Channel& channel = user_client.channels[channel_id];
+
+                                                        if (channel.user_count != 2) continue;
+
+                                                        if ((channel.users[0] == user_client.id or channel.users[1] == user_client.id) and
+                                                            (channel.users[0] == user_id or channel.users[1] == user_id)) {
+                                                                // ===== This is the private message channel between these two users =====
+                                                                // NOTE: If we add group chats this is no longer true.
+                                                                current_channel_id = channel_id;
+                                                                channel_found      = true;
+                                                        }
+                                                }
+
+                                                // ===== Create Channel =====
+                                                if (!channel_found) user_client.CreatePrivateMessageChannel(user_id);
+                                        }
+
+                                        if (user_id == user_client.id) ImGui::PopStyleColor();
+
+                                        ImGui::EndPopup();
+                                }
+
+                                if (!user_colours.contains(user_id)) {
+                                        user_colours[user_id][0] = 0.5f + (float(std::rand() % 1'000) / 2'000);
+                                        user_colours[user_id][1] = 0.5f + (float(std::rand() % 1'000) / 2'000);
+                                        user_colours[user_id][2] = 0.5f + (float(std::rand() % 1'000) / 2'000);
+                                }
+
+                                float* c = user_colours[user_id];
+
+                                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(c[0], c[1], c[2], 1.0f));
                                 ImGui::Text(user.user_name.c_str());
                                 ImGui::PopStyleColor();
 

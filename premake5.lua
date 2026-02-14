@@ -11,14 +11,14 @@ project "ChatApp"
 
    targetdir "Bin/%{cfg.buildcfg}"
 
-   externalincludedirs { "External/imgui", "External/imgui/backends" }
+   externalincludedirs { "External/imgui", "External/imgui/backends", "External/FMOD/inc" }
    includedirs { "Source/" }
 
    -- enableunitybuild "On"
    externalwarnings "Off"
    defines { "IMGUI_DEFINE_MATH_OPERATORS" }
 
-   links { "d3d12.lib", "d3dcompiler.lib", "dxgi.lib" }
+   links { "d3d12.lib", "d3dcompiler.lib", "dxgi.lib", "External/FMOD/lib/x64/fmod_vc.lib" }
 
    files { "Source/**.h", "Source/**.cpp", "External/imgui/backends/imgui_impl_dx12.cpp", "External/imgui/backends/imgui_impl_win32.cpp", "External/imgui/imgui*.cpp" }
 

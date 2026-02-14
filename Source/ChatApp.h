@@ -28,6 +28,13 @@ using TimeStamp = u64;
 
 #include "Message.h"
 
+enum ReservedChannelIDs : ChannelID {
+        ChannelIDServer = 0, // Messages for the server, not to be sent to any chat.
+        ChannelIDGlobal = 1, // Chat which everyone who is connected to the server can see.
+
+        ChannelIDUser = 100, // Start user IDs at 100. Leaves ChatIDs 0 - 99, for other internal uses.
+};
+
 enum class ReturnCode {
         Success,
         FailedToConnectToSocket,
@@ -41,6 +48,7 @@ enum class ReturnCode {
 // Server stores all messages and information on RAM, can move this to a database and then have it be persistent between runs, and also allows more
 // messages to be stored.
 struct Channel {
+        ChannelID   id;
         std::string name;
 
         u32    user_count{};

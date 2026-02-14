@@ -13,6 +13,18 @@ ReturnCode Client::Init() {
         res = WSAStartup(MAKEWORD(2, 2), &wsa_data);
         assert(res == 0 && "Failed Win Sock Startup");
 
+        return Reconnect();
+}
+
+void Client::Shutdown() {
+        shutdown(client_socket, SD_SEND);
+        closesocket(client_socket);
+        WSACleanup();
+}
+
+ReturnCode Client::Reconnect() {
+        int res;
+
         addrinfo* result{};
         addrinfo* ptr{};
         addrinfo  hints{};
@@ -38,7 +50,6 @@ ReturnCode Client::Init() {
         if (client_socket == INVALID_SOCKET) {
                 std::println("Failed creating socket");
                 freeaddrinfo(result);
-                WSACleanup();
                 return ReturnCode::ErrorUnknown;
         }
 
@@ -57,17 +68,10 @@ ReturnCode Client::Init() {
                 std::println("Error at socket(): {}", WSAGetLastError());
                 std::println("Failed Connecting Socket");
                 closesocket(client_socket);
-                WSACleanup();
                 return ReturnCode::FailedToConnectToSocket;
         }
 
         return ReturnCode::Success;
-}
-
-void Client::Shutdown() {
-        shutdown(client_socket, SD_SEND);
-        closesocket(client_socket);
-        WSACleanup();
 }
 
 // Tells the server what to call this client.
@@ -75,7 +79,7 @@ ReturnCode Client::SendUserName(const std::string& user_name) {
         return SendMessage(ChannelIDServer, "username=" + user_name);
 }
 
-ReturnCode Client::SendMessage(const UserID channel, const std::string& message_string) {
+ReturnCode Client::SendMessage(ChannelID channel, const std::string& message_string) {
         int res;
 
         // ===== Get Timestamp =====
@@ -106,6 +110,71 @@ ReturnCode Client::SendMessage(const UserID channel, const std::string& message_
         return ReturnCode::Success;
 }
 
+ReturnCode Client::Ping() {
+        Message message{};
+        message.sender  = id;
+        message.channel = ChannelIDServer;
+
+        ServerMessageType message_type = MessagePing;
+        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+        message.content_length += sizeof(ServerMessageType);
+
+        // ===== Send Message =====
+        int send_flags = 0;
+        int res        = send(client_socket, (char*)&message, sizeof(Message), send_flags);
+
+        if (res == SOCKET_ERROR) {
+                std::println("Failed sending message");
+                return ReturnCode::SendMessageFailed;
+        }
+
+        return ReturnCode::Success;
+}
+
+void Client::CreatePrivateMessageChannel(UserID user_id) {
+        Message message{};
+
+        message.channel   = ChannelIDServer;
+        message.timestamp = 0;
+
+        // ===== Write Message Type =====
+        ServerMessageType message_type = MessageCreateChannel;
+        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+        message.content_length += sizeof(ServerMessageType);
+
+        // ===== Write Invited User ID =====
+        memcpy(&message.content[message.content_length], &user_id, sizeof(UserID));
+        message.content_length += sizeof(UserID);
+
+        // ===== Send Message =====
+        int send_flags = 0;
+        send(client_socket, (char*)&message, sizeof(Message), send_flags);
+}
+
+void Client::InviteUserToChannel(UserID user_id, ChannelID channel_id) {
+        Message message{};
+
+        message.channel   = ChannelIDServer;
+        message.timestamp = 0;
+
+        // ===== Write Message Type =====
+        ServerMessageType message_type = MessageUserInvite;
+        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+        message.content_length += sizeof(ServerMessageType);
+
+        // ===== Write Invited Channel ID =====
+        memcpy(&message.content[message.content_length], &channel_id, sizeof(ChannelID));
+        message.content_length += sizeof(ChannelID);
+
+        // ===== Write Invited User ID =====
+        memcpy(&message.content[message.content_length], &user_id, sizeof(UserID));
+        message.content_length += sizeof(UserID);
+
+        // ===== Send Message =====
+        int send_flags = 0;
+        send(client_socket, (char*)&message, sizeof(Message), send_flags);
+}
+
 void Client::ProcessMessages() {
         int     res;
         Message message;
@@ -121,6 +190,8 @@ void Client::ProcessMessages() {
 
                 int recieve_flags = 0;
                 res               = recv(client_socket, (char*)&message, sizeof(message), recieve_flags);
+
+                if (res == INVALID_SOCKET) return;
 
                 if (message.sender == 0) {
                         // ===== Proccess Message from Server ======
@@ -141,6 +212,9 @@ void Client::ProcessServerMessage(const Message& message) {
         memcpy(&message_type, &message.content[0], sizeof(ServerMessageType));
 
         switch (message_type) {
+        case MessageUserIDGet: {
+                memcpy(&id, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
+        } break;
         case MessageUserListSync: {
                 // ===== Update All Users In All Channels =====
                 Channel& channel = channels[message.channel];
@@ -154,6 +228,8 @@ void Client::ProcessServerMessage(const Message& message) {
 
                         UserID user_id;
                         memcpy(&user_id, &message.content[index_into_content], sizeof(UserID));
+
+                        std::println("Sync Channel: {}, with user: {}", message.channel, user_id);
 
                         bool exists = false;
                         for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
@@ -177,16 +253,76 @@ void Client::ProcessServerMessage(const Message& message) {
                 UserID new_user;
                 memcpy(&new_user, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
 
-                // TODO: Do we need to check if the user already exists?
-                channel.users[channel.user_count] = new_user;
-                channel.user_count++;
+                u32         user_name_length = message.content_length - (sizeof(ServerMessageType) + sizeof(UserID));
+                std::string new_user_name(&message.content[sizeof(ServerMessageType) + sizeof(UserID)], user_name_length);
+
+                bool user_exists = false;
+                for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
+                        UserID user_id = channel.users[user_idx];
+                        if (user_id == new_user) {
+                                user_exists = true;
+                                break;
+                        }
+                }
+
+                if (!user_exists) {
+                        channel.users[channel.user_count] = new_user;
+                        channel.user_count++;
+                }
+
+                // ===== Store Message To Display Join =====
+                Message     display_message = message;
+                const char* joined_text     = " Joined";
+                new_user_name.copy(display_message.content, user_name_length);
+                memcpy(&display_message.content[user_name_length], joined_text, 8);
+                display_message.content_length = user_name_length + 8;
+
+                channel.messages[channel.message_count] = display_message;
+                channel.message_count++;
         } break;
         case MessageUserLeave: {
-                // ===== Remove User to Channel =====
+                UserID leaving_user;
+                memcpy(&leaving_user, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
+
+                User& user = users[leaving_user];
+
+                u32         user_name_length = message.content_length - (sizeof(ServerMessageType) + sizeof(UserID));
+                std::string leaving_user_name(&message.content[sizeof(ServerMessageType) + sizeof(UserID)], user_name_length);
+
+                // ===== Remove User from All Channel =====
+                for (u32 channel_idx = 0; channel_idx < user.channel_count; channel_idx++) {
+                        ChannelID channel_id = user.channels[channel_idx];
+                        Channel&  channel    = channels[channel_id];
+
+                        for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
+                                if (channel.users[user_idx] != leaving_user) continue;
+
+                                channel.user_count--;
+                                channel.users[user_idx] = channel.users[channel.user_count];
+                                break;
+                        }
+
+
+                        // ===== Store Message To Display Leave =====
+                        Message     display_message = message;
+                        const char* left_text       = " Left";
+                        leaving_user_name.copy(display_message.content, user_name_length);
+                        memcpy(&display_message.content[user_name_length], left_text, 6);
+                        display_message.content_length = user_name_length + 6;
+
+                        channel.messages[channel.message_count] = display_message;
+                        channel.message_count++;
+                }
+        } break;
+        case MessageUserLeaveChannel: {
+                // ===== Remove User from Channel =====
                 Channel& channel = channels[message.channel];
 
                 UserID leaving_user;
                 memcpy(&leaving_user, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
+
+                u32         user_name_length = message.content_length - (sizeof(ServerMessageType) + sizeof(UserID));
+                std::string leaving_user_name(&message.content[sizeof(ServerMessageType) + sizeof(UserID)], user_name_length);
 
                 for (u32 user_idx = 0; user_idx < channel.user_count; user_idx++) {
                         if (channel.users[user_idx] != leaving_user) continue;
@@ -195,18 +331,88 @@ void Client::ProcessServerMessage(const Message& message) {
                         channel.users[user_idx] = channel.users[channel.user_count];
                         break;
                 }
-        } break;
+
+                // ===== Store Message To Display Leave =====
+                Message     display_message = message;
+                const char* joined_text     = " Left";
+                leaving_user_name.copy(display_message.content, user_name_length);
+                memcpy(&display_message.content[user_name_length], joined_text, 6);
+                display_message.content_length = user_name_length + 6;
+
+                channel.messages[channel.message_count] = display_message;
+                channel.message_count++;
+
+                // ===== If This is The Leaver Remove =====
+                if (leaving_user == id) {
+                        channels.erase(message.channel);
+                        for (u32 channel_idx = 0; channel_idx < channel_count; channel_idx++) {
+                                if (chat_channels[channel_idx] == message.channel) {
+                                        channel_count--;
+                                        chat_channels[channel_idx] = chat_channels[channel_count];
+                                }
+                        }
+                }
+        }
         case MessageUserNameSend: {
                 // ===== UserID User Name =====
                 UserID user_id;
                 memcpy(&user_id, &message.content[sizeof(ServerMessageType)], sizeof(UserID));
 
                 u32 user_name_length = message.content_length - (sizeof(ServerMessageType) + sizeof(UserID));
+                users[user_id].id    = user_id;
                 users[user_id].user_name.assign(&message.content[sizeof(ServerMessageType) + sizeof(UserID)], user_name_length);
+        } break;
+        case MessageUserNewChannel: {
+                // ===== Channel ID =====
+                ChannelID channel_id;
+                memcpy(&channel_id, &message.content[sizeof(ServerMessageType)], sizeof(ChannelID));
 
-                std::println("Trying to read Username: {}, With length: {}", users[user_id].user_name, user_name_length);
+                std::println("Added To Channel: {}", channel_id);
+
+                // ===== Check if Channel Exists =====
+                bool exists = false;
+                for (u32 channel_idx = 0; channel_idx < channel_count; channel_idx++) {
+                        ChannelID current_channel_id = chat_channels[channel_idx];
+                        if (current_channel_id != channel_id) continue;
+                        exists = true;
+                        break;
+                }
+
+                // ===== Add Channel If Doesnt Exist =====
+                if (!exists) {
+                        chat_channels[channel_count] = channel_id;
+                        channel_count++;
+                        channels[channel_id] = {};
+                }
+
+                // ===== Channel Name ======
+                u32 channel_name_length = message.content_length - (sizeof(ServerMessageType) + sizeof(ChannelID));
+                channels[channel_id].name.assign(&message.content[sizeof(ServerMessageType) + sizeof(ChannelID)], channel_name_length);
         } break;
         }
+}
+
+// NOTE: Once we recieve the message that we leave is when we actually leave.
+void Client::LeaveChannel(ChannelID id) {
+        Channel& channel = channels[id];
+
+        Message message{};
+        message.sender    = id;
+        message.channel   = ChannelIDServer;
+        message.timestamp = 0;
+
+        // ===== Write Message Type =====
+        ServerMessageType message_type = MessageUserLeaveChannel;
+        memcpy(&message.content[0], &message_type, sizeof(ServerMessageType));
+        message.content_length += sizeof(ServerMessageType);
+
+        // ===== Write Channel ID =====
+        memcpy(&message.content[message.content_length], &id, sizeof(ChannelID));
+        message.content_length += sizeof(ChannelID);
+
+        // ===== Send Message =====
+        int send_flags = 0;
+        send(client_socket, (char*)&message, sizeof(Message), send_flags);
 }
 
 void Client::AddChannel(ChannelID id, const std::string& channel_name) {

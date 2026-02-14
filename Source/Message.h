@@ -2,19 +2,22 @@
 
 #include "ChatApp.h"
 
-enum ReservedChannelIDs : ChannelID {
-        ChannelIDServer = 0, // Messages for the server, not to be sent to any chat.
-        ChannelIDGlobal = 1, // Chat which everyone who is connected to the server can see.
-
-        ChannelIDUser = 100, // Start user IDs at 100. Leaves ChatIDs 0 - 99, for other internal uses.
-};
-
 enum ServerMessageType : u32 {
+        MessageNone,
+
+        MessagePing,
+
+        MessageUserIDGet,
         MessageUserListSync,
         MessageUserJoin,
         MessageUserLeave,
+        MessageUserLeaveChannel,
         MessageUserNameRequest,
         MessageUserNameSend,
+
+        MessageUserNewChannel,
+        MessageCreateChannel,
+        MessageUserInvite, // Not really an invite, as your forced into the channel.
 
 };
 

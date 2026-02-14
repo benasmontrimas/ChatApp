@@ -27,6 +27,8 @@ NOTES:
         admins, and the user that created the channel defaults to an admin and can set other users as admins.
 */
 
+#define MAX_CUSTOM_CHANNELS 10'000
+
 struct Server {
         // NOTE: Add flag to allow only a local server.
         void Init();
@@ -34,7 +36,9 @@ struct Server {
 
         void Run();
 
-        void AddUserToChannel(ChannelID channel_id, UserID new_user_id);
+        void      InformUserOfChannel(User& user, Channel& channel);
+        ChannelID CreateUserChannel(User& user, const std::string& name);
+        void      AddUserToChannel(ChannelID channel_id, UserID new_user_id);
 
         WSADATA wsa_data;
         SOCKET  listener_socket{ INVALID_SOCKET };
@@ -44,6 +48,9 @@ struct Server {
 
         std::unordered_map<UserID, User>       users;
         std::unordered_map<ChannelID, Channel> channels;
+
+        u32       custom_channel_count{};
+        ChannelID custom_channel_ids[MAX_CUSTOM_CHANNELS];
 
         bool running;
 };
