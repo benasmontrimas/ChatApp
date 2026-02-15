@@ -135,7 +135,7 @@ int GUI() {
         // Create application window
         WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"ImGui Example", nullptr };
         ::RegisterClassExW(&wc);
-        HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW, 100, 100, (int)(1'280 * main_scale),
+        HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Chat App", WS_OVERLAPPEDWINDOW, 100, 100, (int)(1'280 * main_scale),
                                     (int)(800 * main_scale), nullptr, nullptr, wc.hInstance, nullptr);
 
         // Initialize Direct3D
@@ -672,6 +672,7 @@ void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound) {
                                 Channel channel = user_client.channels[ChannelIDGlobal]; // Copy global
                                 user_client.channels.clear();
                                 user_client.channels[ChannelIDGlobal] = channel;
+                                user_client.channels[ChannelIDGlobal].user_count = 0;
 
                                 current_channel_id = ChannelIDGlobal;
 
