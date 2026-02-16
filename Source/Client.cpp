@@ -34,7 +34,7 @@ ReturnCode Client::Reconnect() {
         hints.ai_protocol = IPPROTO_TCP;
         hints.ai_flags    = AI_PASSIVE;
 
-        // const char* server_address = "2.0.118.94";
+        // ===== Set Here if want to connect to a non local server =====
         const char* server_address = "";
 
         res = getaddrinfo(server_address, server_port, &hints, &result);

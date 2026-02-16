@@ -112,7 +112,7 @@ void           WaitForPendingOperations();
 FrameContext*  WaitForNextFrameContext();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound);
+void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound, FMOD::Sound* private_sound);
 
 FMOD::System* InitFMOD() {
         FMOD::System* sound_system;
@@ -249,6 +249,10 @@ int GUI() {
         FMOD::Sound*  sound        = NULL;
         sound_system->createSound("Assets/sound.mp3", FMOD_LOOP_OFF, NULL, &sound);
 
+        // Private Sound
+        FMOD::Sound*  private_sound        = NULL;
+        sound_system->createSound("Assets/privatesound.mp3", FMOD_LOOP_OFF, NULL, &private_sound);
+
         // Main loop
         bool done = false;
         while (!done) {
@@ -280,7 +284,7 @@ int GUI() {
                 // ImGui::ShowDemoWindow(&show_demo_window);
 
                 // ================== MY UI =========================
-                ChatAppGUI(sound_system, sound);
+                ChatAppGUI(sound_system, sound, private_sound);
 
                 // Rendering
                 ImGui::Render();
@@ -334,6 +338,7 @@ int GUI() {
         ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
         sound->release();
+        private_sound->release();
         DeinitFMOD(sound_system);
 
         return 0;
@@ -593,7 +598,7 @@ float GetTextHeight(const char* text, float wrap_width) {
         return single_line_height.y + (single_line_height.y) * (message_text_size.y / single_line_height.y);
 }
 
-void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound) {
+void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound, FMOD::Sound* private_sound) {
         // TODO: Check Server is still running, if not throw an error modal with a refresh button to allow checking.
 
         // Need to negate so we can use as a ptr to open popup.
@@ -694,7 +699,8 @@ void ChatAppGUI(FMOD::System* sound_system, FMOD::Sound* notification_sound) {
                         if (channel_id == current_channel_id and last_read_message[current_channel_id] == channel.message_count) {
                                 // ===== Dont Send Notification If We Are Looking At It =====
                         } else {
-                                sound_system->playSound(notification_sound, NULL, false, nullptr);
+                                if (channel_id == ChannelIDGlobal) sound_system->playSound(notification_sound, NULL, false, nullptr);
+                                else sound_system->playSound(private_sound, NULL, false, nullptr);
                         }
                 }
 

@@ -21,6 +21,7 @@ void Server::Init() {
         hints.ai_protocol = IPPROTO_TCP;
         hints.ai_flags    = AI_PASSIVE;
 
+        // ===== Set Here if want to connect to a non local server =====
         res = getaddrinfo(NULL, server_port, &hints, &result);
         if (res != 0) {
                 std::println("Failed getaddrinfo function");
@@ -36,16 +37,13 @@ void Server::Init() {
                 return;
         }
 
-        char addr_buffer[32];
-        inet_ntop(result->ai_family, result->ai_addr, addr_buffer, 32);
-        std::println("Binding Server To Address: {}", addr_buffer);
-
         res = bind(listener_socket, result->ai_addr, (int)result->ai_addrlen);
 
         freeaddrinfo(result);
 
         if (res == SOCKET_ERROR) {
                 std::println("Failed Binding Socket");
+                std::println("Error at socket(): {}", WSAGetLastError());
                 closesocket(listener_socket);
                 WSACleanup();
                 return;
